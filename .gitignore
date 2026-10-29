@@ -1,0 +1,32 @@
+# 模型与运行时（不入库，见 README「不含什么」）
+*.moc3
+*.model3.json
+*.physics3.json
+*.exp3.json
+*.motion3.json
+*.can3
+live2dcubismcore.min.js
+assets/**/*.png
+assets/**/*.jpg
+assets/**/*.wav
+assets/**/*.mp3
+
+# 产物
+*.mp4
+*.webm
+*.wav
+*.mp3
+*.png
+*.jpg
+!docs/**/*.png
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+
+# 密钥
+.secrets/
+*.key
+*.token
+.env
