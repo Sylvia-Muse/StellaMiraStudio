@@ -20,6 +20,7 @@
 | 新作品脚手架 | `scripts/new_video.py` | 按日期建目录、填 meta 模板 |
 | 音频体检 | `scripts/voice_analyze.py` | 规格 / 响度 / F0 中位数 |
 | 唱歌试验 | `scripts/sing_poc.py` | TTS 逐音节贴音高（结论：不可行，留作教训） |
+| MV 流水线 | `scripts/mv_build.py` / `mv_mux.py` | 官方音轨 + 官方 LRC + 人声分离 → 竖屏 MV |
 
 ## 目录约定
 
