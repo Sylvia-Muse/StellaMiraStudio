@@ -31,6 +31,30 @@ const p = new InkParticles(cv, {
 });
 await p.ready;
 
+// 演示：给一条"笔迹"（一个人影的轮廓），粒子沿它分布
+function personPath() {
+  const P = [];
+  const cx = 0.5;
+  // 头
+  for (let i = 0; i <= 40; i++) {
+    const a = Math.PI * (-0.1 + 1.2 * (i / 40));
+    P.push([cx + Math.cos(a) * 0.10, 0.30 + Math.sin(a) * 0.10]);
+  }
+  // 右肩 → 右袖 → 下垂的手
+  P.push([cx + 0.13, 0.44], [cx + 0.22, 0.50], [cx + 0.26, 0.62], [cx + 0.24, 0.74]);
+  // 右手回到身体右侧 → 袍摆
+  P.push([cx + 0.14, 0.80], [cx + 0.20, 0.90], [cx + 0.10, 0.96]);
+  // 左摆 → 左袖
+  P.push([cx - 0.10, 0.96], [cx - 0.20, 0.90], [cx - 0.14, 0.80]);
+  P.push([cx - 0.24, 0.74], [cx - 0.26, 0.62], [cx - 0.22, 0.50], [cx - 0.13, 0.44]);
+  return P;
+}
+
+if (new URLSearchParams(location.search).get('path') !== '0') {
+  p.setPath(personPath(), 0.028);
+  p.set({ alpha: 0.9, size: 0.020, curl: 1.1 });
+}
+
 let t = 0, playing = true, last = performance.now();
 const tEl = document.getElementById('t');
 

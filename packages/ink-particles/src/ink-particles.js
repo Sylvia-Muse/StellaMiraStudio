@@ -31,6 +31,10 @@ uniform float uSpread;                 // 扩散半径（相对画布短边）
 uniform vec2  uCenter;                 // 主体中心（0..1）
 uniform vec3  uColor;
 uniform float uAlpha;
+uniform sampler2D uPath;     // 笔迹路径：每像素一个点（xy = 位置 0..1，zw = 法线）
+uniform float uUsePath;      // 0 = 径向墨团，1 = 沿笔迹
+uniform float uThickness;    // 笔画粗细（归一化，相对画布短边）
+uniform float uPathLen;      // 路径采样点数（用于换算纹理坐标）
 
 out vec3 vColor;
 out float vAlpha;
@@ -86,8 +90,23 @@ void main() {
   float rad   = pow(fract(aSeed.y * 13.713), 1.75);   // >1 = 向中心聚，像墨团
   float phase = fract(aSeed.x * 7.919 + aSeed.y * 3.337);
 
-  // 以中心为原点的极坐标散点，压扁成画布比例
-  vec2 base = vec2(cos(ang), sin(ang) * 1.18) * rad * uSpread;
+  vec2 base;
+  vec2 pathNormal = vec2(0.0);
+
+  if (uUsePath > 0.5) {
+    // 沿笔迹分布：种子决定落在笔画的哪一段、偏离中心多远
+    float u = fract(aSeed.x * 977.13);
+    vec2 tc = vec2((u * (uPathLen - 1.0) + 0.5) / uPathLen, 0.5);
+    vec4 p = texture(uPath, tc);
+    pathNormal = p.zw;
+    // 横向偏移：多数贴着笔画中心，少数是飞白
+    float off = (fract(aSeed.y * 31.7) * 2.0 - 1.0);
+    off = sign(off) * pow(abs(off), 2.2);        // 中间密、两边稀
+    base = (p.xy - 0.5) * 2.0 + pathNormal * off * uThickness;
+  } else {
+    // 以中心为原点的极坐标散点，压扁成画布比例
+    base = vec2(cos(ang), sin(ang) * 1.18) * rad * uSpread;
+  }
 
   // 流动：把种子 + 时间当作 3D 噪声坐标，卷曲场给出速度方向
   vec3 q = vec3(base * 1.6, phase * 2.0 + uTime * 0.06 * uFlow);
@@ -247,7 +266,9 @@ export class InkParticles {
     this.uni = this._uniforms(this.prog, [
       'uTime', 'uRes', 'uSize', 'uFlow', 'uCurl', 'uSpread', 'uCenter',
       'uColor', 'uAlpha', 'uInk', 'uUseInk',
+      'uPath', 'uUsePath', 'uThickness', 'uPathLen',
     ]);
+    this.opts.thickness = opt.thickness ?? 0.03;
 
     // 离屏场景（粒子先画到这里，再和纸底合成）
     this.scene = gl.createTexture();
@@ -271,8 +292,11 @@ export class InkParticles {
 
     this.inkTex = this._white(gl);
     this.paperTex = this._white(gl);
+    this.pathTex = this._white(gl);
     this.useInk = 0;
     this.usePaper = 0;
+    this.usePath = 0;
+    this.pathLen = 1;
 
     this.ready = (async () => {
       if (opt.ink) { this.inkTex = await this._load(opt.ink); this.useInk = 1; }
@@ -330,6 +354,52 @@ export class InkParticles {
     this.w = w; this.h = h;
   }
 
+  /**
+   * 给一条"笔迹路径"：粒子会沿着它分布成墨线。
+   * @param {Array<[number,number]>} pts 归一化坐标（0..1），按顺序连成折线
+   * @param {number} thickness 笔画粗细（相对画布短边，默认 0.03）
+   */
+  setPath(pts, thickness = 0.03) {
+    if (!pts || pts.length < 2) { this.usePath = 0; return this; }
+    const gl = this.gl;
+    const n = Math.min(1024, pts.length);
+    // 重采样成 n 个点（沿折线等距）
+    const segs = [];
+    let total = 0;
+    for (let i = 1; i < pts.length; i++) {
+      const d = Math.hypot(pts[i][0] - pts[i-1][0], pts[i][1] - pts[i-1][1]);
+      segs.push(d); total += d;
+    }
+    const data = new Float32Array(n * 4);
+    let acc = 0, si = 0, accSeg = 0;
+    for (let i = 0; i < n; i++) {
+      const target = (i / (n - 1)) * total;
+      while (si < segs.length - 1 && accSeg + segs[si] < target) { accSeg += segs[si]; si++; }
+      const t = segs[si] ? (target - accSeg) / segs[si] : 0;
+      const a = pts[si], b = pts[si + 1] ?? pts[si];
+      const x = a[0] + (b[0] - a[0]) * t;
+      const y = a[1] + (b[1] - a[1]) * t;
+      // 法线
+      let dx = b[0] - a[0], dy = b[1] - a[1];
+      const L = Math.hypot(dx, dy) || 1;
+      data[i*4+0] = x; data[i*4+1] = y;
+      data[i*4+2] = -dy / L; data[i*4+3] = dx / L;
+    }
+    gl.bindTexture(gl.TEXTURE_2D, this.pathTex);
+    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA32F, n, 1, 0, gl.RGBA, gl.FLOAT, data);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+    this.pathLen = n;
+    this.usePath = 1;
+    this.opts.thickness = thickness;
+    return this;
+  }
+
+  /** 取消笔迹，回到径向墨团 */
+  clearPath() { this.usePath = 0; return this; }
+
   /** 设定时刻（秒）。同一 t 必然得到同一帧。 */
   setTime(t) { this.time = t; return this; }
 
@@ -363,6 +433,12 @@ export class InkParticles {
     gl.bindTexture(gl.TEXTURE_2D, this.inkTex);
     gl.uniform1i(this.uni.uInk, 0);
     gl.uniform1f(this.uni.uUseInk, this.useInk);
+    gl.activeTexture(gl.TEXTURE1);
+    gl.bindTexture(gl.TEXTURE_2D, this.pathTex);
+    gl.uniform1i(this.uni.uPath, 1);
+    gl.uniform1f(this.uni.uUsePath, this.usePath);
+    gl.uniform1f(this.uni.uThickness, this.opts.thickness);
+    gl.uniform1f(this.uni.uPathLen, this.pathLen);
     gl.drawArrays(gl.POINTS, 0, this.count);
 
     // 2) 合成：纸底 + 粒子 + 暗角
