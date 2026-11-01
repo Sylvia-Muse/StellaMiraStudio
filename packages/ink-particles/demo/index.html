@@ -1,0 +1,57 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8"/>
+<title>ink-particles demo</title>
+<style>
+  html,body{margin:0;height:100%;background:#1a1512;}
+  #stage{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;}
+  canvas{width:540px;height:960px;display:block;box-shadow:0 0 60px rgba(0,0,0,.6);}
+  #hud{position:fixed;left:12px;bottom:12px;color:#cfc2ae;font:13px/1.6 ui-monospace,monospace;
+       background:rgba(0,0,0,.45);padding:8px 10px;border-radius:6px;}
+  #hud b{color:#f0e4cf;}
+</style>
+</head>
+<body>
+<div id="stage"><canvas id="cv"></canvas></div>
+<div id="hud">t = <b id="t">0.00</b>s　|　空格暂停　|　← → 步进 0.1s</div>
+<script type="module">
+import { InkParticles } from '../src/ink-particles.js';
+
+const cv = document.getElementById('cv');
+const p = new InkParticles(cv, {
+  count: 120000,
+  ink: 'ink-dot.png',
+  paper: 'paper.png',
+  size: 0.026,
+  spread: 0.55,
+  flow: 0.9,
+  curl: 2.2,
+  alpha: 0.85,
+});
+await p.ready;
+
+let t = 0, playing = true, last = performance.now();
+const tEl = document.getElementById('t');
+
+function loop(now) {
+  const dt = Math.min(0.05, (now - last) / 1000); last = now;
+  if (playing) t += dt;
+  p.setTime(t).render();
+  tEl.textContent = t.toFixed(2);
+  requestAnimationFrame(loop);
+}
+requestAnimationFrame(loop);
+
+addEventListener('keydown', e => {
+  if (e.code === 'Space') { playing = !playing; e.preventDefault(); }
+  if (e.code === 'ArrowRight') { playing = false; t += 0.1; }
+  if (e.code === 'ArrowLeft') { playing = false; t = Math.max(0, t - 0.1); }
+});
+
+// 给逐帧抓取用：同一 t 必然同一帧
+window.__frame = (sec) => { playing = false; t = sec; p.setTime(sec).render(); return sec; };
+window.__ready = true;
+</script>
+</body>
+</html>

@@ -1,0 +1,11 @@
+{
+  "name": "ink-particles",
+  "version": "0.1.0",
+  "description": "确定性的 WebGL2 粒子系统（做墨/流体质感，可按时间精确出帧）",
+  "type": "module",
+  "main": "src/ink-particles.js",
+  "files": ["src", "demo", "README.md", "LICENSE"],
+  "keywords": ["webgl2", "particles", "curl-noise", "deterministic", "ink", "mv"],
+  "license": "MIT",
+  "author": "蝶清梦 / Sylvia Muse"
+}

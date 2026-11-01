@@ -82,3 +82,12 @@ python3 scripts/debut_build.py mux
 
 代码：MIT（见 `LICENSE`）。
 `docs/` 下的文字：CC BY-NC 4.0（署名—非商业性使用）。
+
+## packages/ink-particles
+
+确定性的 WebGL2 粒子系统——同一时刻 `t` 永远渲染同一帧，专为"逐帧抓成 MV"设计。
+
+```bash
+cd packages/ink-particles/demo
+python3 make-textures.py && python3 -m http.server 8080
+```
