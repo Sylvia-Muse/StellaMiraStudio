@@ -50,7 +50,13 @@ function personPath() {
   return P;
 }
 
-if (new URLSearchParams(location.search).get('path') !== '0') {
+// 也可以用 tools/edge-path.py 从一张图提取的路径（?src=die 切换）
+const q = new URLSearchParams(location.search);
+if (q.get('src') === 'die') {
+  const j = await (await fetch('die-path.json')).json();
+  p.setPath(j.points, 0.008);
+  p.set({ alpha: 0.7, size: 0.009, curl: 0.5, flow: 0.5 });
+} else if (q.get('path') !== '0') {
   p.setPath(personPath(), 0.028);
   p.set({ alpha: 0.9, size: 0.020, curl: 1.1 });
 }
