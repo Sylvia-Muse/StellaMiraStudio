@@ -362,28 +362,22 @@ export class InkParticles {
   setPath(pts, thickness = 0.03) {
     if (!pts || pts.length < 2) { this.usePath = 0; return this; }
     const gl = this.gl;
+    // 注意：点列**按原样使用**，不沿折线插值。
+    // 因为从图片提取出来的点是无序点云（按行扫描），插值会把相邻但不相连的点连成折线，
+    // 结果就是"填充"而不是"线条"。这里改成等间隔抽稀。
     const n = Math.min(1024, pts.length);
-    // 重采样成 n 个点（沿折线等距）
-    const segs = [];
-    let total = 0;
-    for (let i = 1; i < pts.length; i++) {
-      const d = Math.hypot(pts[i][0] - pts[i-1][0], pts[i][1] - pts[i-1][1]);
-      segs.push(d); total += d;
-    }
+    const step = pts.length / n;
     const data = new Float32Array(n * 4);
-    let acc = 0, si = 0, accSeg = 0;
     for (let i = 0; i < n; i++) {
-      const target = (i / (n - 1)) * total;
-      while (si < segs.length - 1 && accSeg + segs[si] < target) { accSeg += segs[si]; si++; }
-      const t = segs[si] ? (target - accSeg) / segs[si] : 0;
-      const a = pts[si], b = pts[si + 1] ?? pts[si];
-      const x = a[0] + (b[0] - a[0]) * t;
-      const y = a[1] + (b[1] - a[1]) * t;
-      // 法线
-      let dx = b[0] - a[0], dy = b[1] - a[1];
+      const a = pts[Math.floor(i * step)];
+      const b = pts[Math.min(pts.length - 1, Math.floor(i * step) + 1)];
+      const x = a[0], y = a[1];
+      let dx = b[0] - x, dy = b[1] - y;
       const L = Math.hypot(dx, dy) || 1;
-      data[i*4+0] = x; data[i*4+1] = y;
-      data[i*4+2] = -dy / L; data[i*4+3] = dx / L;
+      data[i * 4 + 0] = x;
+      data[i * 4 + 1] = y;
+      data[i * 4 + 2] = -dy / L;
+      data[i * 4 + 3] = dx / L;
     }
     gl.bindTexture(gl.TEXTURE_2D, this.pathTex);
     gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA32F, n, 1, 0, gl.RGBA, gl.FLOAT, data);
