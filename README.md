@@ -108,3 +108,12 @@ cd demos/ink-glyph-scroll && python3 -m http.server 8090
 - `红昭愿-改造建议.md`：一个真实案例的病灶与改法
 
 配套脚本在 `tools/视频自检/`（响度、字幕越界、景别、影调、相机路径）。
+
+## docs/ComfyUI + tools/comfy
+
+- `docs/ComfyUI/ComfyUI-社区流行度调研.md`：2026 年做 MV 的人实际在用什么（带 star/下载量证据）
+- `docs/ComfyUI/ComfyUI-MV工作流调研.md`：哪些方案在我们这台卡（24GB，常被占）上真能跑
+- `docs/ComfyUI/ComfyUI-落地清单.md`：从零到能跑的分步命令与显存降级阶梯
+- `tools/comfy/`：6 个已对线上 ComfyUI 节点表校验过的工作流 JSON + 校验器 + 执行器
+
+一句话结论：**MV 不是"一个工作流出成片"**——分镜 + 节拍对齐 → 逐镜 I2V → 超分 → 代码合成。

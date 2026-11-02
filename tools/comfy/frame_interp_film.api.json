@@ -1,0 +1,55 @@
+{
+  "_meta": {
+    "name": "补帧：FILM 光流插帧（16/24fps → 32/48fps，消抖）",
+    "source": "本机 ComfyUI 0.38 原生节点 FrameInterpolationModelLoader / FrameInterpolate（官方 blueprint frame_interpolation 用 film_net_fp16；RIFE 走同一个 loader，换文件名即可）",
+    "models": [
+      "frame_interpolation/film_net_fp16.safetensors（Comfy-Org/Frame-Interpolation，仓库 license 标 other，上游 FILM=Apache-2.0 / RIFE=MIT）",
+      "备选：frame_interpolation/rife_v4.26.safetensors（更省显存、更快，2 倍插帧逐帧 ~45MB 级显存）"
+    ],
+    "vram": "极小：模型本体 fp16 几十 MB 量级 + 单对帧激活，实测口径按 1080p 单帧 3 通道算 < 1.5GB；可与主模型共存",
+    "license": "RIFE = MIT（hzwer/Practical-RIFE）；FILM = Apache-2.0（google-research/frame-interpolation）。Comfy-Org 转存仓库 tag 为 other，商用前再核一次",
+    "how_to_run": "python3 scripts/comfy/run_workflow.py scripts/comfy/frame_interp_film.api.json --set 2:file='clip_16fps.mp4' --set 4:multiplier=2"
+  },
+  "1": {
+    "class_type": "FrameInterpolationModelLoader",
+    "inputs": {
+      "model_name": "film_net_fp16.safetensors"
+    }
+  },
+  "2": {
+    "class_type": "LoadVideo",
+    "inputs": {
+      "file": "clip_16fps.mp4"
+    }
+  },
+  "3": {
+    "class_type": "GetVideoComponents",
+    "inputs": {
+      "video": ["2", 0]
+    }
+  },
+  "4": {
+    "class_type": "FrameInterpolate",
+    "inputs": {
+      "interp_model": ["1", 0],
+      "images": ["3", 0],
+      "multiplier": 2
+    }
+  },
+  "5": {
+    "class_type": "CreateVideo",
+    "inputs": {
+      "images": ["4", 0],
+      "fps": 32.0
+    }
+  },
+  "6": {
+    "class_type": "SaveVideo",
+    "inputs": {
+      "video": ["5", 0],
+      "filename_prefix": "mv/interp",
+      "format": "auto",
+      "codec": "auto"
+    }
+  }
+}

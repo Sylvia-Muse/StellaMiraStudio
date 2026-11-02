@@ -1,0 +1,122 @@
+{
+  "_meta": {
+    "name": "Wan2.2 TI2V-5B 图生视频（把一张静画动起来）",
+    "source": "与 wan22_5b_t2v.api.json 同一套官方参数，仅把 Wan22ImageToVideoLatent 接上 start_image；图像先 ImageScale 到 32 的倍数",
+    "models": [
+      "diffusion_models/wan2.2_ti2v_5B_fp16.safetensors (10.00 GB)",
+      "text_encoders/umt5_xxl_fp8_e4m3fn_scaled.safetensors (6.74 GB)",
+      "vae/wan2.2_vae.safetensors (1.41 GB)"
+    ],
+    "vram": "同 T2V，官方 8GB 可跑；低于 8GB 空闲改用 GGUF Q4_K_M 版（3.43 GB，需装 ComfyUI-GGUF）",
+    "license": "Wan2.2 Apache-2.0 可商用",
+    "REMINDER": "输入图必须是我们自己拍的/画的原创画面（内部约定），不得使用他人作品",
+    "how_to_run": "python3 scripts/comfy/run_workflow.py scripts/comfy/wan22_5b_i2v.api.json --set 12:image='start.png' --set 5:text='衣摆与发丝被风吹起，水面微波扩散，镜头缓慢右移'"
+  },
+  "1": {
+    "class_type": "UNETLoader",
+    "inputs": {
+      "unet_name": "wan2.2_ti2v_5B_fp16.safetensors",
+      "weight_dtype": "default"
+    }
+  },
+  "2": {
+    "class_type": "ModelSamplingSD3",
+    "inputs": {
+      "model": ["1", 0],
+      "shift": 8.0
+    }
+  },
+  "3": {
+    "class_type": "CLIPLoader",
+    "inputs": {
+      "clip_name": "umt5_xxl_fp8_e4m3fn_scaled.safetensors",
+      "type": "wan",
+      "device": "default"
+    }
+  },
+  "4": {
+    "class_type": "VAELoader",
+    "inputs": {
+      "vae_name": "wan2.2_vae.safetensors"
+    }
+  },
+  "12": {
+    "class_type": "LoadImage",
+    "inputs": {
+      "image": "start.png"
+    }
+  },
+  "13": {
+    "class_type": "ImageScale",
+    "inputs": {
+      "image": ["12", 0],
+      "upscale_method": "lanczos",
+      "width": 832,
+      "height": 480,
+      "crop": "center"
+    }
+  },
+  "5": {
+    "class_type": "CLIPTextEncode",
+    "inputs": {
+      "text": "衣摆与发丝被风轻轻吹起，水面有细微波纹扩散，镜头缓慢右移，光影缓慢流动，画面保持人物外貌一致",
+      "clip": ["3", 0]
+    }
+  },
+  "6": {
+    "class_type": "CLIPTextEncode",
+    "inputs": {
+      "text": "色调艳丽，过曝，静态，细节模糊不清，字幕，风格，作品，画作，画面，静止，整体发灰，最差质量，低质量，JPEG压缩残留，丑陋的，残缺的，多余的手指，画得不好的手部，画得不好的脸部，畸形的，毁容的，形态畸形的肢体，手指融合，静止不动的画面，杂乱的背景，三条腿，背景人很多，倒着走",
+      "clip": ["3", 0]
+    }
+  },
+  "7": {
+    "class_type": "Wan22ImageToVideoLatent",
+    "inputs": {
+      "vae": ["4", 0],
+      "width": 832,
+      "height": 480,
+      "length": 97,
+      "batch_size": 1,
+      "start_image": ["13", 0]
+    }
+  },
+  "8": {
+    "class_type": "KSampler",
+    "inputs": {
+      "model": ["2", 0],
+      "seed": 20260306,
+      "steps": 20,
+      "cfg": 5.0,
+      "sampler_name": "uni_pc",
+      "scheduler": "simple",
+      "positive": ["5", 0],
+      "negative": ["6", 0],
+      "latent_image": ["7", 0],
+      "denoise": 1.0
+    }
+  },
+  "9": {
+    "class_type": "VAEDecode",
+    "inputs": {
+      "samples": ["8", 0],
+      "vae": ["4", 0]
+    }
+  },
+  "10": {
+    "class_type": "CreateVideo",
+    "inputs": {
+      "images": ["9", 0],
+      "fps": 24.0
+    }
+  },
+  "11": {
+    "class_type": "SaveVideo",
+    "inputs": {
+      "video": ["10", 0],
+      "filename_prefix": "mv/wan22_5b_i2v",
+      "format": "auto",
+      "codec": "auto"
+    }
+  }
+}
