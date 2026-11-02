@@ -34,3 +34,4 @@ __pycache__/
 # 演示页面需要的贴图（豁免上面的全局 *.png 规则）
 !demos/**/*.png
 !packages/**/*.png
+!demos/**/*.jpg

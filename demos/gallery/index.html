@@ -1,0 +1,64 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>红昭愿 · 画帧</title>
+<style>
+  :root{color-scheme:light}
+  body{margin:0;background:#f3ece1;color:#2a2018;font:16px/1.7 "Songti SC","STSong",serif;}
+  header{max-width:1120px;margin:0 auto;padding:56px 24px 8px}
+  h1{font-size:34px;letter-spacing:.2em;margin:0}
+  .sub{color:#7a6a58;font-size:13px;letter-spacing:.2em;margin:10px 0 0}
+  .meta{color:#8b7a66;font-size:13px;margin-top:18px;letter-spacing:.06em}
+  .grid{max-width:1120px;margin:28px auto 0;padding:0 24px 80px;
+        display:grid;grid-template-columns:repeat(auto-fill,minmax(320px,1fr));gap:14px}
+  figure{margin:0;background:#faf6ef;border:1px solid #ddd0bd}
+  figure img{display:block;width:100%;height:auto}
+  figcaption{padding:9px 12px 11px;color:#7a6a58;font-size:13px;letter-spacing:.08em;
+             display:flex;justify-content:space-between}
+  figcaption b{color:#2a2018;font-weight:400}
+  footer{max-width:1120px;margin:0 auto;padding:0 24px 70px;color:#9a8a76;font-size:13px}
+  a{color:#8a5a3a}
+</style>
+</head>
+<body>
+<header>
+  <h1>红 昭 愿 · 画 帧</h1>
+  <div class="sub">二创 MV / 长卷水墨 / 十帧</div>
+  <div class="meta">
+    原曲：音阙诗听　·　画面：清梦（Sylvia Muse）　·　1920×1080 / 30fps / 2:52<br>
+    每句词整句写在一张横卷上，写完留在纸上不擦；卷子缓缓往前拉，唱到最后整首词都在纸上。
+  </div>
+</header>
+
+<div class="grid" id="grid"></div>
+
+<footer>
+  <a href="../ink-glyph-scroll/">→ 看渲染器怎么跑</a>　·　
+  <a href="../../">← 回到工坊</a>
+</footer>
+
+<script>
+const frames = [
+  [3,   "起笔：横卷与第一滴墨"],
+  [12,  "「红昭愿」三字写完，落印"],
+  [22,  "手中雕刻生花 / 刀锋千转蜿蜒成画"],
+  [30,  "春风绕过发梢红纱（朱砂）"],
+  [47,  "间奏：卷面推远，只剩干墨"],
+  [66,  "一生长"],
+  [95,  "副歌：多行同时在场"],
+  [120, "隔却山海"],
+  [140, "可曾添些荒唐"],
+  [160, "收：墨散了，字还在"],
+];
+const g = document.getElementById('grid');
+for (const [t, cap] of frames) {
+  const f = document.createElement('figure');
+  f.innerHTML = `<img src="img/hzy_${t}.jpg" alt="${cap}" loading="lazy">
+    <figcaption><b>${cap}</b><span>${String(Math.floor(t/60))}:${String(t%60).padStart(2,'0')}</span></figcaption>`;
+  g.appendChild(f);
+}
+</script>
+</body>
+</html>
