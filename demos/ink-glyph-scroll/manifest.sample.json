@@ -1,0 +1,134 @@
+{
+ "song": "示例曲目（请替换为你自己的音轨与歌词）",
+ "duration": 171.58,
+ "lrc": [
+  {
+   "t": 16.45,
+   "end": 18.6,
+   "text": "示例第一行歌词"
+  },
+  {
+   "t": 18.65,
+   "end": 20.73,
+   "text": "示例第二行歌词"
+  },
+  {
+   "t": 20.78,
+   "end": 22.3,
+   "text": "示例第三行"
+  }
+ ],
+ "sections": [
+  {
+   "t": 0.0,
+   "end": 16.75,
+   "name": "前奏",
+   "name_source": "lyrics",
+   "mood": "起始·偏静",
+   "name_evidence": {
+    "rule": "before_first_lyric"
+   },
+   "rms_db": -17.9,
+   "trend": "起始"
+  },
+  {
+   "t": 16.75,
+   "end": 27.0,
+   "name": "主歌",
+   "name_source": "lyrics",
+   "mood": "起始·偏静",
+   "rms_db": -17.9,
+   "trend": "起始",
+   "name_evidence": {
+    "rule": "lyrics_not_chorus",
+    "chorus_ratio": 0.0
+   }
+  },
+  {
+   "t": 27.0,
+   "end": 58.0,
+   "name": "主歌",
+   "name_source": "lyrics",
+   "rms_db": -13.7,
+   "trend": "↑ 推进",
+   "name_evidence": {
+    "rule": "lyrics_not_chorus",
+    "chorus_ratio": 0.33
+   },
+   "mood": "推进"
+  },
+  {
+   "t": 58.0,
+   "end": 86.0,
+   "name": "副歌",
+   "name_source": "lyrics",
+   "rms_db": -12.3,
+   "trend": "→ 持平",
+   "name_evidence": {
+    "rule": "lyrics_repeat",
+    "chorus_ratio": 0.67,
+    "chorus_block_lines": 10,
+    "chorus_repeats": 3
+   },
+   "mood": "平稳·偏响"
+  },
+  {
+   "t": 86.0,
+   "end": 116.0,
+   "name": "主歌",
+   "name_source": "lyrics",
+   "rms_db": -15.6,
+   "trend": "↓ 收",
+   "name_evidence": {
+    "rule": "lyrics_not_chorus",
+    "chorus_ratio": 0.0
+   },
+   "mood": "回落·偏静"
+  },
+  {
+   "t": 116.0,
+   "end": 142.0,
+   "name": "副歌",
+   "name_source": "lyrics",
+   "mood": "推进",
+   "rms_db": -13.2,
+   "trend": "↑ 推进",
+   "name_evidence": {
+    "rule": "lyrics_repeat",
+    "chorus_ratio": 0.94,
+    "chorus_block_lines": 10,
+    "chorus_repeats": 3
+   }
+  },
+  {
+   "t": 142.0,
+   "end": 151.6,
+   "name": "副歌",
+   "name_source": "lyrics",
+   "rms_db": -12.6,
+   "trend": "→ 持平",
+   "name_evidence": {
+    "rule": "lyrics_repeat",
+    "chorus_ratio": 1.0,
+    "chorus_block_lines": 10,
+    "chorus_repeats": 3
+   },
+   "mood": "平稳·偏响"
+  },
+  {
+   "t": 151.6,
+   "end": 171.58,
+   "name": "尾段",
+   "name_source": "lyrics",
+   "mood": "平稳·偏响",
+   "name_evidence": {
+    "rule": "after_last_lyric"
+   },
+   "rms_db": -12.6,
+   "trend": "→ 持平"
+  }
+ ],
+ "warnings": [
+  "这是结构示例：t/end/text 三个字段必须自己按音轨实测，不要照抄时间"
+ ]
+}

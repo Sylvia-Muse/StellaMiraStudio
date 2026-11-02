@@ -35,6 +35,7 @@ uniform sampler2D uPath;     // 笔迹路径：每像素一个点（xy = 位置 
 uniform float uUsePath;      // 0 = 径向墨团，1 = 沿笔迹
 uniform float uThickness;    // 笔画粗细（归一化，相对画布短边）
 uniform float uPathLen;      // 路径采样点数（用于换算纹理坐标）
+uniform float uMorph;        // 0 = 纯径向墨团，1 = 完全沿笔迹（中间值就是"墨正在聚成形状"）
 
 out vec3 vColor;
 out float vAlpha;
@@ -90,10 +91,12 @@ void main() {
   float rad   = pow(fract(aSeed.y * 13.713), 1.75);   // >1 = 向中心聚，像墨团
   float phase = fract(aSeed.x * 7.919 + aSeed.y * 3.337);
 
-  vec2 base;
+  vec2 baseRadial = vec2(cos(ang), sin(ang) * 1.18) * rad * uSpread;
+  vec2 basePath = vec2(0.0);
   vec2 pathNormal = vec2(0.0);
+  bool hasPath = uUsePath > 0.5;
 
-  if (uUsePath > 0.5) {
+  if (hasPath) {
     // 沿笔迹分布：种子决定落在笔画的哪一段、偏离中心多远
     float u = fract(aSeed.x * 977.13);
     vec2 tc = vec2((u * (uPathLen - 1.0) + 0.5) / uPathLen, 0.5);
@@ -102,19 +105,33 @@ void main() {
     // 横向偏移：多数贴着笔画中心，少数是飞白
     float off = (fract(aSeed.y * 31.7) * 2.0 - 1.0);
     off = sign(off) * pow(abs(off), 2.2);        // 中间密、两边稀
-    base = (p.xy - 0.5) * 2.0 + pathNormal * off * uThickness;
-  } else {
-    // 以中心为原点的极坐标散点，压扁成画布比例
-    base = vec2(cos(ang), sin(ang) * 1.18) * rad * uSpread;
+    basePath = (p.xy - 0.5) * 2.0 + pathNormal * off * uThickness;
   }
 
-  // 流动：把种子 + 时间当作 3D 噪声坐标，卷曲场给出速度方向
-  vec3 q = vec3(base * 1.6, phase * 2.0 + uTime * 0.06 * uFlow);
-  vec3 c = curl(q) * uCurl;
+  // 聚散：在"散开的墨团"和"聚成的形状"之间插值
+  float m = hasPath ? clamp(uMorph, 0.0, 1.0) : 0.0;
+  vec2 base = mix(baseRadial, basePath, m);
+  // 聚合过程中加一点抖动，让"聚"看起来是墨在流动而不是硬插值
+  float turb = sin(m * 3.14159) * 0.06;
+  base += vec2(sin(phase * 21.0 + uTime * 1.3), cos(phase * 17.0 + uTime * 1.1)) * turb;
 
-  vec2 pos = base + c.xy * 0.35;
-  // 缓慢的整体呼吸，让整团墨会"活着"
-  pos *= 1.0 + 0.035 * sin(uTime * 0.55 + phase * 6.0);
+  // 流动：三层行波叠加 —— 关键是**对 t 连续**，所以每一粒的位置随时间平滑推移，
+  // 看起来像水在流（叠加不同波长/速度，自然出现"急涛"与"涓流"两种尺度）。
+  float t = uTime * uFlow;
+  vec2 flow = vec2(0.0);
+  // 大尺度：慢而宽的涌动
+  flow += 0.55 * vec2(sin(base.y * 2.1 + t * 0.55 + phase * 0.6),
+                      cos(base.x * 1.9 - t * 0.47 + phase * 0.4));
+  // 中尺度：主流（波纹更密）
+  flow += 0.30 * vec2(sin((base.x + base.y) * 3.7 - t * 0.95),
+                      cos((base.x - base.y) * 4.1 + t * 0.82));
+  // 小尺度：碎浪
+  flow += 0.15 * vec2(sin(base.x * 9.3 + t * 1.9 + phase * 2.0),
+                      cos(base.y * 8.7 - t * 1.7 + phase * 1.3));
+
+  vec2 pos = base + flow * uCurl * 0.16;
+  // 缓慢的整体呼吸，让整团墨"活着"（同样连续）
+  pos *= 1.0 + 0.03 * sin(uTime * 0.5 + phase * 3.0);
 
   // 纵横比：把（可能是任意比例的）画布当成归一化空间
   float aspect = uRes.x / uRes.y;
@@ -266,7 +283,7 @@ export class InkParticles {
     this.uni = this._uniforms(this.prog, [
       'uTime', 'uRes', 'uSize', 'uFlow', 'uCurl', 'uSpread', 'uCenter',
       'uColor', 'uAlpha', 'uInk', 'uUseInk',
-      'uPath', 'uUsePath', 'uThickness', 'uPathLen',
+      'uPath', 'uUsePath', 'uThickness', 'uPathLen', 'uMorph',
     ]);
     this.opts.thickness = opt.thickness ?? 0.03;
 
@@ -297,6 +314,7 @@ export class InkParticles {
     this.usePaper = 0;
     this.usePath = 0;
     this.pathLen = 1;
+    this.morph = 1.0;
 
     this.ready = (async () => {
       if (opt.ink) { this.inkTex = await this._load(opt.ink); this.useInk = 1; }
@@ -391,6 +409,9 @@ export class InkParticles {
     return this;
   }
 
+  /** 聚散程度：0 = 散开的墨团，1 = 聚成笔迹 */
+  setMorph(m) { this.morph = Math.max(0, Math.min(1, m)); return this; }
+
   /** 取消笔迹，回到径向墨团 */
   clearPath() { this.usePath = 0; return this; }
 
@@ -433,6 +454,7 @@ export class InkParticles {
     gl.uniform1f(this.uni.uUsePath, this.usePath);
     gl.uniform1f(this.uni.uThickness, this.opts.thickness);
     gl.uniform1f(this.uni.uPathLen, this.pathLen);
+    gl.uniform1f(this.uni.uMorph, this.morph ?? 1.0);
     gl.drawArrays(gl.POINTS, 0, this.count);
 
     // 2) 合成：纸底 + 粒子 + 暗角

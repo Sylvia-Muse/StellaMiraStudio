@@ -91,3 +91,20 @@ python3 scripts/debut_build.py mux
 cd packages/ink-particles/demo
 python3 make-textures.py && python3 -m http.server 8080
 ```
+
+## demos/ink-glyph-scroll
+
+长卷水墨 MV 渲染器：歌词整句写在一张横卷上、写完保留、卷面推进；粒子累加进 RGBA16F 密度场做"墨"，笔压由骨架的距离变换量出来。
+
+```bash
+cd demos/ink-glyph-scroll && python3 -m http.server 8090
+```
+
+## docs/视频技法
+
+- `视频技法库.md`：镜头/节奏/转场/构图/调色/声音，每条给可执行参数
+- `视频自检清单.md`：发布前 20 条，每条附一条能跑的命令
+- `自动化清单.md`：哪些能脚本化、哪些不能（含"自动切点检测为什么不能用"）
+- `红昭愿-改造建议.md`：一个真实案例的病灶与改法
+
+配套脚本在 `tools/视频自检/`（响度、字幕越界、景别、影调、相机路径）。

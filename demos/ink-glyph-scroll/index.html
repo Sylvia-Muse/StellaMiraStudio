@@ -1,0 +1,549 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<title>红昭愿 · 长卷 · 横屏 · 蝶清梦</title>
+<style>
+  html,body{margin:0;padding:0;background:#0b0907;overflow:hidden;}
+  #wrap{position:relative;width:1920px;height:1080px;margin:0 auto;transform-origin:top left;}
+  canvas{position:absolute;inset:0;width:1920px;height:1080px;display:block;}
+
+  /* 字幕：楷体 + 正片叠底 —— 字是长在纸上的，不是贴上去的 */
+  #lyric{position:absolute;left:240px;right:240px;bottom:130px;text-align:center;
+    font-family:"Kaiti SC","STKaiti","Songti SC",serif;
+    font-size:52px;color:#1b140e;letter-spacing:.10em;line-height:1.35;
+    mix-blend-mode:multiply;
+    text-shadow:0 0 12px rgba(38,26,18,.16), 0 0 26px rgba(38,26,18,.10);
+    white-space:nowrap;pointer-events:none;}
+  #lyric .ch{display:inline-block;will-change:opacity,transform;}
+
+  #credit{position:absolute;left:74px;bottom:40px;
+    font-family:"Kaiti SC","STKaiti",serif;font-size:18px;color:#3a2b20;
+    letter-spacing:.34em;mix-blend-mode:multiply;opacity:.5;}
+
+  /* 印章是"纸上"的东西：每帧按镜头投影到屏幕 */
+  #seal{position:absolute;left:0;top:0;width:100px;height:100px;
+    mix-blend-mode:multiply;opacity:0;transform-origin:50% 50%;will-change:transform,opacity;}
+  #seal img{width:100%;height:100%;display:block;}
+
+  #drop{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;
+    font-family:"Hiragino Sans GB",sans-serif;font-size:26px;color:#e6d8c6;
+    background:rgba(10,8,6,.85);letter-spacing:.15em;z-index:9;}
+  #drop.hide{display:none;}
+</style>
+</head>
+<body>
+<div id="wrap">
+  <canvas id="cv"></canvas>
+  <div id="lyric"></div>
+  <div id="credit">蝶清梦 · 二创 MV</div>
+  <div id="seal"><img src="art/seal.png" alt="" /></div>
+  <div id="drop">研墨中…</div>
+</div>
+
+<script type="module">
+import { InkArt } from './src/ink-particles-art.js';
+
+const $ = id => document.getElementById(id);
+const ly = $('lyric'), sealEl = $('seal'), dropEl = $('drop');
+
+const clamp = (v, a = 0, b = 1) => Math.max(a, Math.min(b, v));
+const smooth = t => { t = clamp(t); return t * t * (3 - 2 * t); };
+const mix = (a, b, k) => a + (b - a) * k;
+
+/* ------------------------------------------------------------------ 数据 */
+const manifest = await (await fetch(window.MANIFEST || 'manifest.sample.json')).json();
+const GLYPHS   = await (await fetch('art/glyphs.json')).json();
+const MASKS    = await (await fetch('art/masks.json')).json();
+const BEAT     = await (await fetch(window.BEATS || 'beats.sample.json')).json();
+const BFPS = BEAT.fps;
+
+const LYR = manifest.lrc.filter(r => r.t != null)
+  .map(r => ({ t: r.t, end: r.end ?? (r.t + 4), text: r.text }));
+const SECTIONS = manifest.sections || [];
+const BEATS = (manifest.beat_times || []).slice().sort((a, b) => a - b);
+
+function env(arr, t) {
+  const x = clamp(t * BFPS, 0, arr.length - 1.001);
+  const i = Math.floor(x), f = x - i;
+  return mix(arr[i] ?? 0, arr[i + 1] ?? arr[i] ?? 0, f);
+}
+function nearBeat(t) {   // 离"最近一拍"的时间（前后都算）—— 拍点处不会突跳
+  if (!BEATS.length) return 9;
+  let lo = 0, hi = BEATS.length - 1;
+  while (lo < hi) { const mid = (lo + hi + 1) >> 1; if (BEATS[mid] <= t) lo = mid; else hi = mid - 1; }
+  let d = Math.abs(t - BEATS[lo]);
+  const nxt = BEATS[lo + 1];
+  if (nxt != null) d = Math.min(d, Math.abs(t - nxt));
+  return d;
+}
+function secAt(t) {
+  for (const s of SECTIONS) if (t >= s.t && t < s.end) return s;
+  return SECTIONS[SECTIONS.length - 1] || { name: '主歌' };
+}
+
+/* ------------------------------------------------------------------ 长卷排版
+ * 一句一行：句内从左到右按笔顺连续写，句与句往下换行。
+ * 每行再向右错开一点点（ROW_DRIFT），于是"卷面"缓缓向左走 —— 而且是 t 的
+ * 连续函数，换行时不跳。
+ */
+const CELL = 0.235;        // 字身框步距（世界单位，1 单位 = zoom 1 时的画面高）
+const GLYPH = 0.205;       // 字形框边长
+const GAP = 0.055;         // 字与字之间"墨迹"的净空
+const ROW_PITCH = 0.430;   // 行距 ≥ 1.5 倍字高
+const X0 = 0.34, Y0 = 0.30;
+const ROW_DRIFT = 0.050;   // 每行向右的错落（= 卷面缓缓左移）
+const MAX_PER_ROW = 8;     // 硬折行：一列最多 8 字，保证整句落在安全区内
+
+const RED_LINES = new Map();
+LYR.forEach((L, i) => {
+  if (/红|纱/.test(L.text)) RED_LINES.set(i, 0.85);
+  else if (/心/.test(L.text)) RED_LINES.set(i, 0.95);
+  else if (/嫁|血/.test(L.text)) RED_LINES.set(i, 0.30);
+});
+
+const M = MASKS.metrics || {};
+const hw = c => ((M[c] ? M[c][0] : 0.78) * GLYPH) * 0.5;   // 该字墨迹的半宽
+
+const ROWS = [];
+const CHARS = [];
+{
+  let rowIdx = 0;
+  LYR.forEach((L, i) => {
+    const chars = Array.from(L.text);
+    const dur = Math.max(0.14, L.end - L.t);
+    const nAll = Math.max(1, chars.length);
+    const charDur = clamp(dur * 0.86 / nAll, 0.045, 0.55);
+    const red = RED_LINES.get(i) || 0;
+    // 硬折行：每行最多 MAX_PER_ROW 字，超出就换行（同一句继续）
+    for (let start = 0; start < chars.length; start += MAX_PER_ROW) {
+      const seg = chars.slice(start, start + MAX_PER_ROW);
+      const rowX = X0 + rowIdx * ROW_DRIFT;
+      const rowY = Y0 + rowIdx * ROW_PITCH;
+      // 按"墨迹"排字距：x 依次推进 hw + GAP + hw
+      let x = rowX + hw(seg[0]);
+      const xs = [];
+      for (let k = 0; k < seg.length; k++) {
+        if (k > 0) x += hw(seg[k - 1]) + GAP + hw(seg[k]);
+        xs.push(x);
+      }
+      const left = xs[0] - hw(seg[0]);
+      const right = xs[xs.length - 1] + hw(seg[seg.length - 1]);
+      for (let k = 0; k < seg.length; k++) {
+        const gk = start + k;
+        CHARS.push({
+          c: seg[k], x: xs[k], y: rowY,
+          t0: L.t + gk * charDur, dur: charDur, red, row: rowIdx, k, line: i,
+        });
+      }
+      ROWS.push({ i: rowIdx, line: i, t: L.t, end: L.end, text: seg.join(''),
+                  x0: left, y: rowY, width: right - left, n: seg.length, charDur, red,
+                  firstChar: CHARS.length - seg.length });
+      rowIdx++;
+    }
+  });
+}
+// 卷首标题「红昭愿」
+{
+  const tchars = Array.from('红昭愿');
+  const TH = 0.44;
+  let tx = X0 + 0.30 + hw(tchars[0]) * (TH / GLYPH);
+  tchars.forEach((c, k) => {
+    if (k > 0) tx += (hw(tchars[k - 1]) + hw(c)) * (TH / GLYPH) + 0.14;
+    CHARS.push({
+      c, x: tx, y: -0.62, t0: 2.2 + k * 2.0, dur: 1.15,
+      red: k === 0 ? 0.55 : 0, row: -1, k, size: TH,
+    });
+  });
+}
+
+/* ------------------------------------------------------------------ 镜头 */
+// 取景：以"这一行"为基准，再迭代把同一屏里看得见的**所有行**都包进来
+// （只框当前行/上一行不够 —— 再上面那一行的左端会从左边溜出去）。
+// 用 0.80 而不是 0.88，留给过渡和呼吸 8% 的余量。
+function framingFor(row, prev) {
+  let cy = row.y - (prev ? 0.215 : 0.0);
+  let cx = row.x0 + row.width * 0.5;
+  let z = clamp(1.7778 * 0.80 / Math.max(0.5, row.width), 0.45, 1.02);
+  for (let it = 0; it < 3; it++) {
+    const halfH = 0.5 / z + GLYPH * 0.55;
+    let L = 1e9, R = -1e9;
+    for (const r of ROWS) {
+      // 前后各一行也一定算进来：换行的过渡期间它们同时可见，
+      // 取景必须把"这一屏会出现的东西"一次框住，否则过渡那几帧就出画。
+      const near = Math.abs(r.i - row.i) <= 1;
+      if (!near && Math.abs(r.y - cy) > halfH) continue;
+      L = Math.min(L, r.x0);
+      R = Math.max(R, r.x0 + r.width);
+    }
+    if (L > R) { L = row.x0; R = row.x0 + row.width; }
+    cx = (L + R) * 0.5;
+    z = clamp(1.7778 * 0.80 / Math.max(0.5, R - L), 0.45, 1.02);
+  }
+  return { cx, cy, z };
+}
+/* ---------------------------------------------------------------- 镜头 v3
+ * 用 vcamera_report.py 量出来的 v1 三个病：
+ *   1) 两段**纯器乐空档**（53.05–66.05 / 81.05–100.20）里没有歌词行 →
+ *      ROWS.forEach 不生成任何关键帧 → 相机完全静止，最长一次 19.5s。
+ *   2) 结尾手写的 pushKey(163.0/168.4) 和自动行关键帧（164.28/169.39）互相打架：
+ *      拉到 0.16 又被弹回 0.85，拉到 0.070 又弹回 0.878 —— 最后 9 秒在抽搐。
+ *   3) 每行 zoom 只由行宽决定，景别动态范围 1.60×（12.9%→20.7%）。
+ *
+ * v3 的两条设计原则：
+ *   A. **取景事件 = 快速到位（0.38s）+ 停住**，不是慢漂移。
+ *      慢漂移在观众那边等于没动，在 `vcamera_report` 的阶跃检测里也过不了阈值。
+ *   B. 空档里没有行关键帧，所以整段可以放心写成显式序列，不会打架。
+ */
+const KEYS = [];
+const MOVE = 0.38;          // "快速到位"的标准时长
+const CUT = 0.034;          // 硬切：差 1 帧
+const END_GUARD = 166.5;    // 此刻之后不生成"跟行"关键帧，交给结尾段
+
+function pushKey(t, cx, cy, zoom) {
+  if (t > END_GUARD) return;
+  const last = KEYS[KEYS.length - 1];
+  if (last && Math.abs(last.t - t) < 0.02) { Object.assign(last, { cx, cy, zoom }); return; }
+  KEYS.push({ t, cx, cy, zoom });
+}
+function pushKeyEnd(t, cx, cy, zoom) {
+  const last = KEYS[KEYS.length - 1];
+  if (last && Math.abs(last.t - t) < 0.010) { Object.assign(last, { cx, cy, zoom }); return; }
+  KEYS.push({ t, cx, cy, zoom });
+}
+/* 把一串取景事件写成关键帧：到点前一直保持上一个取景，到点瞬间用 MOVE 秒推过去 */
+function seq(events, moveDur = MOVE) {
+  for (let i = 0; i < events.length; i++) {
+    const e = events[i], p = events[i - 1];
+    if (p) pushKey(e.t - (e.hard ? CUT : moveDur), p.cx, p.cy, p.z);
+    pushKey(e.t, e.cx, e.cy, e.z);
+  }
+}
+
+/* ---- 前奏 0 → 16.45：标题三个字，每写一个换一次取景 ---- */
+{
+  const TZ = -0.62, TX = X0 + 0.75;
+  seq([
+    { t: 0.00, cx: TX, cy: TZ, z: 0.98 },
+    { t: 2.30, cx: TX, cy: TZ, z: 1.06 },   // 「红」
+    { t: 4.30, cx: TX, cy: TZ, z: 0.88 },   // 「昭」
+    { t: 6.30, cx: TX, cy: TZ, z: 1.04 },   // 「愿」
+    { t: 9.00, cx: TX, cy: TZ - 0.10, z: 0.86 },
+    { t: 12.00, cx: TX - 0.18, cy: TZ - 0.05, z: 1.00 },
+    { t: 14.60, cx: TX, cy: TZ - 0.20, z: 0.88 },
+  ], 0.55);
+}
+
+/* ---- 段落系数：副歌更近，尾段更远 ---- */
+const SEC_SCALE = { '前奏': 0.80, '主歌': 1.00, '副歌': 1.16, '尾段': 0.64 };
+const secNameOf = t => (secAt(t + 0.01) || {}).name || '主歌';
+// 段落边界必须按**第几个 section**判断：manifest 里连续出现两个「主歌」是两段，
+// 按名字比较会把它们粘成一段，两段之间的"段尾推近 / 段首拉远"就全丢了。
+const secIdxOf = t => { const s = secAt(t + 0.01); return SECTIONS.indexOf(s); };
+
+/* ---- 每行：基础取景 × 段落系数 × 段首/段尾强调 ----
+ * 段尾 ×1.88（推成近景；长行会溢出画面，由 shader 的四边淡出兜住）
+ * 段首 ×0.56（拉成全景，把上一段的字一并收进画面）
+ * 长行（>2.6s）行中再加一次 1.20× 的推近，避免"一句话一个画面" */
+const Z_MAX = 1.28;   // 字形图集 150px/字，zoom 1.0 时已经放大 1.48×；
+                      // 再往上放字缘明显发虚（实测 1.92 时糊成一片），所以封顶。
+
+/* 每行两个取景：
+ *   open  —— 起笔时的取景（跟随行宽；段首再拉远成"全景"）
+ *   close —— 这一行写到一半之后推成的"近景"（段尾最强，普通长行弱推）
+ * 关键：close **不能**在行首就生效。v2 里在行首直接切到近景，结果整屏框住的是
+ * 一片还没写字的空白纸，上一行只在顶边露一条 —— 实测 t=47.5 就是这个画面。
+ */
+/* 拉远之后，画面里会多看见几行 —— 原来的 framingFor 是按"基准 zoom"算并集的，
+ * 一旦把它乘小(段首 ×0.56)，新露出来的行就可能跑出画面（实测新样片 12/80 帧
+ * 左端越界 1.1–1.25%）。这里按**最终 zoom** 重算并集，并在放不下时回缩到能放下。
+ * 近景(close)是**故意裁切**的，不走这个函数。 */
+function fitOpen(row, zWant) {
+  let z = zWant, L = 0, R = 0;
+  for (let k = 0; k < 4; k++) {
+    const halfH = 0.5 / z + GLYPH * 0.55;
+    L = 1e9; R = -1e9;
+    for (const r of ROWS) {
+      if (Math.abs(r.y - row.y) > halfH) continue;
+      L = Math.min(L, r.x0); R = Math.max(R, r.x0 + r.width);
+    }
+    if (L > R) { L = row.x0; R = row.x0 + row.width; }
+    // 画面在 zoom z 下宽 1.7778/z 个世界单位；要求并集占画面宽 ≤0.86
+    if ((R - L) * z / 1.7778 > 0.86) z = (0.86 * 1.7778) / (R - L);
+    else break;
+  }
+  return { cx: (L + R) * 0.5, z };
+}
+
+function rowFraming(idx) {
+  const row = ROWS[idx];
+  const prev = idx > 0 ? ROWS[idx - 1] : null;
+  const f = framingFor(row, prev);
+  const nm = secNameOf(row.t);
+  const base = SEC_SCALE[nm] ?? 1.0;
+  const si = secIdxOf(row.t);
+  const first = idx === 0 || secIdxOf(prev.t) !== si;
+  const last = idx === ROWS.length - 1 || secIdxOf(ROWS[idx + 1].t) !== si;
+  const dur = Math.max(0.14, row.end - row.t);
+
+  const zWant = Math.min(f.z * base * (first ? 0.56 : 1.0), Z_MAX);
+  const fit = fitOpen(row, zWant);
+  const open = { cx: fit.cx, cy: f.cy, z: fit.z };
+
+  const push = last ? 1.88 : (dur > 2.6 ? 1.24 : 1.0);
+  const close = push > 1.02
+    ? { cx: row.x0 + row.width * 0.5, cy: row.y - 0.06,
+        z: Math.min(f.z * Math.max(base, 0.92) * push, Z_MAX) }
+    : null;
+  return { open, close, first, last, dur };
+}
+
+ROWS.forEach((row, idx) => {
+  const k = rowFraming(idx);
+  const { dur } = k;
+  pushKey(row.t - 0.02 * dur, k.open.cx, k.open.cy, k.open.z);
+  if (k.close) {
+    const tc = row.t + 0.62 * dur;          // 字写过大半之后才推近
+    pushKey(tc - MOVE, k.open.cx, k.open.cy, k.open.z);
+    pushKey(tc, k.close.cx, k.close.cy, k.close.z);
+    pushKey(row.t + 0.985 * dur, k.close.cx, k.close.cy, k.close.z);
+  } else {
+    pushKey(row.t + 0.88 * dur, k.open.cx, k.open.cy, k.open.z);
+  }
+});
+
+/* ---- 间奏 A：53.05 → 66.05（13.0s，58.0 副歌进鼓）---- */
+{
+  const ia = (() => { let r = 0; for (let i = 0; i < ROWS.length; i++) if (ROWS[i].t <= 53.06) r = i; return r; })();
+  const ib = Math.min(ia + 1, ROWS.length - 1);
+  const a = ROWS[ia], fa = framingFor(a, ia > 0 ? ROWS[ia - 1] : null);
+  const fb = rowFraming(ib).open, z0 = fa.z;
+  seq([
+    { t: 53.40, cx: fa.cx, cy: fa.cy, z: z0 * 0.74 },              // 写完 → 拉远留白
+    { t: 56.20, cx: fa.cx, cy: fa.cy - 0.55, z: z0 * 0.52 },
+    { t: 58.00, cx: fa.cx, cy: fa.cy - 0.90, z: z0 * 0.32, hard: true },  // 副歌进鼓：硬切到最远
+    { t: 59.60, cx: fa.cx, cy: fa.cy - 0.90, z: z0 * 0.74 },       // 立刻推回来
+    { t: 62.40, cx: fa.cx + 0.35, cy: fa.cy - 1.20, z: z0 * 0.98 },
+    { t: 64.30, cx: fb.cx, cy: fb.cy, z: z0 * 1.10 },
+    { t: 66.03, cx: fb.cx, cy: fb.cy, z: fb.z },                    // 交回下一行
+  ]);
+}
+
+/* ---- 间奏 B：81.05 → 100.20（19.2s，86.0 段落切换）---- */
+{
+  const ia = (() => { let r = 0; for (let i = 0; i < ROWS.length; i++) if (ROWS[i].t <= 81.06) r = i; return r; })();
+  const ib = Math.min(ia + 1, ROWS.length - 1);
+  const a = ROWS[ia], fa = framingFor(a, ia > 0 ? ROWS[ia - 1] : null);
+  const fb = rowFraming(ib).open, z0 = fa.z;
+  seq([
+    { t: 81.20, cx: fa.cx, cy: fa.cy, z: z0 * 0.72 },
+    { t: 85.90, cx: fa.cx, cy: fa.cy - 0.70, z: z0 * 0.50 },
+    { t: 86.00, cx: fa.cx, cy: fa.cy - 0.95, z: z0 * 0.33, hard: true },  // 段落切换：硬切到"整卷留白"
+    { t: 89.20, cx: fa.cx, cy: fa.cy - 0.60, z: z0 * 0.29 },       // 留白里极慢地再退一点
+    { t: 90.60, cx: fa.cx, cy: fa.cy - 0.50, z: z0 * 0.34 },
+    { t: 92.50, cx: fa.cx, cy: fa.cy - 0.40, z: z0 * 0.42 },
+    { t: 94.30, cx: fa.cx, cy: fa.cy - 0.28, z: z0 * 0.55 },
+    { t: 96.20, cx: fa.cx, cy: fa.cy - 0.15, z: z0 * 0.68 },       // 推回来
+    { t: 99.00, cx: fb.cx, cy: fb.cy, z: z0 * 0.98 },
+    { t: 100.18, cx: fb.cx, cy: fb.cy, z: fb.z },
+  ]);
+}
+
+/* ---- 结尾：全卷揭示（END_GUARD 已挡掉 166.5 之后的"跟行"关键帧）---- */
+{
+  const lastRow = ROWS[ROWS.length - 1];
+  const fl = rowFraming(ROWS.length - 1).open;
+  const midX = (X0 + lastRow.x0) * 0.5;
+  const midY = (Y0 + lastRow.y) * 0.5;
+  pushKeyEnd(166.50, fl.cx, fl.cy, fl.z * 1.00);
+  pushKeyEnd(168.80, midX, midY, fl.z * 0.19);
+  pushKeyEnd(171.00, midX, midY, fl.z * 0.075);
+  pushKeyEnd(171.58, midX, midY, fl.z * 0.052);
+}
+KEYS.sort((a, b) => a.t - b.t);
+
+function cameraAt(t) {
+  let i = 0;
+  while (i < KEYS.length - 1 && KEYS[i + 1].t <= t) i++;
+  const a = KEYS[i], b = KEYS[Math.min(i + 1, KEYS.length - 1)];
+  let u = b.t > a.t ? clamp((t - a.t) / (b.t - a.t)) : 0;
+  u = mix(u, smooth(u), 0.75);
+  const cx = mix(a.cx, b.cx, u) + 0.003 * Math.sin(t * 0.26);
+  const cy = mix(a.cy, b.cy, u) + 0.006 * Math.sin(t * 0.21 + 1.1) + 0.0045 * Math.sin(t * 0.77 + 0.5);
+  const zoom = mix(a.zoom, b.zoom, u)
+             * (1 + 0.025 * Math.sin(t * 0.62 + 0.4) + 0.010 * Math.sin(t * 1.13 + 2.2));
+  return { cx, cy, zoom };
+}
+
+/* ------------------------------------------------------------------ 逐帧实例 */
+function charsAt(t) {
+  const live = [], dry = [];
+  // 当前正在写的那一行：写完的字也要保持浓（原来一律淡到 0.30–0.45，
+  // 结果任何时刻画面上只有一两个字是"实墨"，实测暗部面积只有 0.5% 画面 —— 远看是一张纸）。
+  let curRow = -1;
+  for (const r of ROWS) { if (t >= r.t - 0.05 && t < r.end + 0.05) { curRow = r.i; break; } }
+  for (const ch of CHARS) {
+    if (t < ch.t0 - 0.02) continue;
+    const write = clamp((t - ch.t0) / ch.dur);
+    const age = t - (ch.t0 + ch.dur);
+    const size = ch.size || GLYPH;
+    if (write < 1) {
+      // 正在写：最清晰、最浓（同一张锐利字模，只是按笔顺逐渐显现）
+      live.push({ c: ch.c, x: ch.x, y: ch.y, size, write, red: ch.red,
+                  alpha: 1.55, wet: 1 });
+    } else {
+      // 干墨：淡下去（0.35~0.45），但保持锐利；只有很老的才略微发虚
+      const aged = (ch.row === curRow)
+        ? 0.66
+        : 0.30 + 0.15 * Math.exp(-Math.max(0, age) / 10.0) + (ch.row === -1 ? 0.06 : 0);
+      dry.push({ c: ch.c, x: ch.x, y: ch.y, size, write: 1.0, red: ch.red,
+                 alpha: aged, wet: 0 });
+    }
+  }
+  return { live, dry };
+}
+
+/* ------------------------------------------------------------------ 墨团 */
+function bloomsAt(t, pulse) {
+  const out = [];
+  const cam = cameraAt(t);
+  const calm = (t < 16.4) || (t > 86.6 && t < 100.2) || (t > 53.0 && t < 66.0);
+  if (calm) {
+    out.push({
+      time: t, center: [cam.cx, cam.cy],
+      spread: 0.26 + 0.10 * env(BEAT.bass, t) + 0.06 * pulse,
+      flow: 1.05, curl: 2.6,
+      size: 0.030, alpha: (t > 86.6 && t < 100.2 ? 0.0016 : 0.0030), soft: 0.92,
+    });
+  }
+  return out;
+}
+
+/* ------------------------------------------------------------------ 渲染 */
+const art = new InkArt($('cv'), {});
+await art.ready;
+art.setGlyphRects(MASKS.rects);
+dropEl.classList.add('hide');
+window.__art = art;
+window.__rows = ROWS; window.__sections = SECTIONS; window.__keats = () => KEYS;
+window.__cameraAt = cameraAt; window.__rowFraming = rowFraming;
+
+const SEAL = { x: X0 + 1.55, y: -0.30, size: 0.46 };
+
+function renderAt(t) {
+  const F = window.__flags || {};
+  const bass = env(BEAT.bass, t);
+  const full = env(BEAT.full, t);
+  const pulse = Math.exp(-nearBeat(t) / 0.45) * (0.45 + 0.55 * bass);
+  const cam = cameraAt(t);
+  const { live, dry } = charsAt(t);
+  const tail = 1 - smooth(clamp((t - 171.0) / 0.55));
+
+  art.begin();
+
+  art.draw(0, {
+    time: t, cam: [cam.cx, cam.cy], zoom: cam.zoom,
+    size: 0.0042, alpha: 0.0060 + 0.0025 * bass, soft: 0.55,
+  });
+
+  for (const b of (F.noBloom ? [] : bloomsAt(t, pulse))) {
+    art.draw(1, {
+      ...b, cam: [cam.cx, cam.cy], zoom: cam.zoom,
+      alpha: b.alpha * (0.85 + 0.30 * bass),
+    });
+  }
+
+  const all = [...(F.noMasks ? [] : dry), ...(F.noLive ? [] : live)];
+  if (all.length) {
+    art.drawMasks(all.map(m => ({
+      c: m.c, x: m.x, y: m.y, size: m.size, write: m.write,
+      alpha: m.alpha * tail, red: m.red,
+    })), { time: t, cam: [cam.cx, cam.cy], zoom: cam.zoom });
+  }
+
+  art.finish({
+    time: t, cam: [cam.cx, cam.cy], zoom: cam.zoom,
+    density: 2.10 * (1 + 0.10 * pulse) * (1 + 0.05 * bass),
+    bleedAmt: 1.15 * (1 + 0.30 * bass + 0.22 * pulse),
+    dryAmt: 0.30,
+    washAmt: (t > 86.6 && t < 100.2 ? 0.9 : 0.45) * (0.55 + 0.55 * bass),
+    vignette: 0.17, paperScale: 0.33,
+    grain: 0.006,
+    pulse,
+    smooth: 1.75 + 0.95 * Math.sin(t * 0.85) + 0.35 * Math.sin(t * 1.63 + 1.2),
+  });
+
+  // 调试：当前正在写的是哪一行
+  {
+    let cur = null;
+    for (const r of ROWS) { if (t >= r.t - 0.05 && t < r.end + 0.05) { cur = r; break; } }
+    window.__rowNow = cur ? cur.text : '';
+  }
+  setLyric(t);
+  setSeal(t, cam);
+  return t;
+}
+
+/* ------------------------------------------------------------------ 字幕 */
+let curLine = -1, spans = [];
+function setLyric(t) {
+  let live = -1;
+  for (let i = 0; i < LYR.length; i++) {
+    if (t >= LYR[i].t - 0.02 && t < LYR[i].end + 0.02) { live = i; break; }
+  }
+  if (live !== curLine) {
+    curLine = live;
+    if (live < 0) { ly.innerHTML = ''; spans = []; }
+    else {
+      ly.innerHTML = Array.from(LYR[live].text).map(c => `<span class="ch">${c}</span>`).join('');
+      spans = Array.from(ly.querySelectorAll('.ch'));
+    }
+  }
+  if (live < 0 || !spans.length) return;
+  const L = LYR[live];
+  const outK = clamp((t - (L.end - 0.40)) / 0.38);
+  for (let i = 0; i < spans.length; i++) {
+    const a = smooth((t - L.t - 0.02 - i * 0.045) / 0.30) * (1 - outK);
+    const st = spans[i].style;
+    st.opacity = a.toFixed(3);
+    st.transform = `translateY(${((1 - a) * 7 - outK * 5).toFixed(2)}px)`;
+  }
+}
+
+/* ------------------------------------------------------------------ 印章（投影到屏幕） */
+function setSeal(t, cam) {
+  const k = clamp((t - 14.9) / 0.30);
+  const zx = (SEAL.x - cam.cx) * cam.zoom / 1.7778 + 0.5;
+  const zy = 0.5 + (SEAL.y - cam.cy) * cam.zoom;
+  const size = SEAL.size * cam.zoom * 1080;
+  const sc = mix(1.42, 1.0, smooth(k));
+  const fadeOut = t > 170.4 ? Math.max(0, 1 - (t - 170.4) / 1.1) : 1;
+  // 印章是 DOM 元素，不吃 shader 的四边淡出 —— 贴边时自己淡掉，免得被切一刀
+  const half = SEAL.size * cam.zoom * 0.5 / 1.0;      // 屏幕比例下的半边长（高）
+  const edge = (v, h) => clamp(Math.min(v - (h - 0.06), (1 - v) - (h - 0.06)) / 0.10);
+  const edgeFade = Math.min(edge(zy, size / 1080 * 0.5), edge(zx, size / 1920 * 0.5));
+  sealEl.style.opacity = (smooth(k) * 0.92 * fadeOut * edgeFade).toFixed(3);
+  sealEl.style.width = sealEl.style.height = size.toFixed(1) + 'px';
+  sealEl.style.transform =
+    `translate(${(zx * 1920 - size / 2).toFixed(1)}px, ${(zy * 1080 - size / 2).toFixed(1)}px) `
+    + `scale(${sc.toFixed(4)}) rotate(${mix(-8, -2.5, smooth(k)).toFixed(2)}deg)`;
+}
+
+/* ------------------------------------------------------------------ 播放 / 抓帧 */
+const audio = new Audio('song.m4a'); audio.preload = 'auto';
+let playing = false;
+addEventListener('click', async () => { if (!playing) { await audio.play(); playing = true; } });
+audio.addEventListener('play', () => playing = true);
+audio.addEventListener('pause', () => playing = false);
+function loop() { if (playing) renderAt(audio.currentTime); requestAnimationFrame(loop); }
+
+renderAt(0);
+requestAnimationFrame(loop);
+
+window.__frame = (t) => renderAt(t);
+window.__seek = window.__frame;
+window.__duration = 171.58;
+window.__ready = true;
+</script>
+</body>
+</html>
