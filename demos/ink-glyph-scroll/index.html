@@ -530,14 +530,35 @@ function setSeal(t, cam) {
 }
 
 /* ------------------------------------------------------------------ 播放 / 抓帧 */
-const audio = new Audio('song.m4a'); audio.preload = 'auto';
-let playing = false;
-addEventListener('click', async () => { if (!playing) { await audio.play(); playing = true; } });
+// 有音轨就跟着音轨播；没有（公开演示没带版权音轨）就自己走时间轴循环
+let playing = false, clock = 0, hasAudio = false;
+const audio = new Audio(window.AUDIO || 'song.m4a');
+audio.preload = 'auto';
+audio.addEventListener('canplaythrough', () => { hasAudio = true; });
+audio.addEventListener('error', () => { hasAudio = false; });
 audio.addEventListener('play', () => playing = true);
 audio.addEventListener('pause', () => playing = false);
-function loop() { if (playing) renderAt(audio.currentTime); requestAnimationFrame(loop); }
+addEventListener('click', async () => {
+  if (!hasAudio) return;
+  if (!playing) { try { await audio.play(); playing = true; } catch {} }
+});
 
-renderAt(0);
+const LOOP_FROM = 6, LOOP_TO = 30;   // 无音轨时演示的区间（前奏落印 → 开头两句）
+let last = performance.now();
+function loop(now) {
+  const dt = Math.min(0.05, (now - last) / 1000); last = now;
+  if (hasAudio && playing) {
+    renderAt(audio.currentTime);
+  } else {
+    clock += dt;
+    if (clock > LOOP_TO) clock = LOOP_FROM;
+    renderAt(Math.max(LOOP_FROM, clock));
+  }
+  requestAnimationFrame(loop);
+}
+
+clock = LOOP_FROM;
+renderAt(LOOP_FROM);
 requestAnimationFrame(loop);
 
 window.__frame = (t) => renderAt(t);
