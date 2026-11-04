@@ -118,22 +118,32 @@ def main():
                         best = v
                 if best < a.thr:
                     al.append((255 - best) / 255.0)
+            # 几何也在原分辨率上判：960 的 2×2 平均会把"只占一两列"的墨摊到邻列，
+            # 造出"越界 28 列 / 2.92%"的假阳性（实测 t=15.0s，原分辨率其实 0 列）。
+            n_over = len(al)
             if al:
                 al.sort()
-                fixed.append((t, x0, x1, over, frac, (al[len(al) // 2], al[-1], len(al))))
+                fixed.append((t, x0, x1, over, frac, (al[len(al) // 2], al[-1], n_over), n_over))
             else:
-                fixed.append((t, x0, x1, over, frac, (0.0, 0.0, 0)))
-        bad = fixed
+                fixed.append((t, x0, x1, over, frac, (0.0, 0.0, 0), 0))
+        # 原分辨率没有任何越界列的，判为假阳性，不算进越界帧
+        bad = [b for b in fixed if (b[6] or 0) > 0]
+        dropped = len(fixed) - len(bad)
     print("== 出画自检 %s ==" % a.tag)
     print("视频 %s  抽帧 %d（每 %.1fs） margin=%.0f%% thr=%d"
           % (os.path.basename(a.video), len(rows), a.step, a.margin * 100, a.thr))
     print("越界帧：%d / %d" % (len(bad), len(rows)))
+    try:
+        if dropped:
+            print("（另有 %d 帧在 960 抽帧上判为越界、回原分辨率复核为假阳性，已剔除）" % dropped)
+    except NameError:
+        pass
     if bad:
         bad.sort(key=lambda r: -r[4])
         print("最严重 5 帧（附越界列浓度证据）：")
         print("   %-10s %-20s %-14s %-9s %-9s %s" %
               ("时间", "墨迹 x 范围", "越界/960列", "中位alpha", "最暗alpha", "原分辨率越界列"))
-        for t, x0, x1, over, frac, al in bad[:8]:
+        for t, x0, x1, over, frac, al, _n in bad[:8]:
             am, ax, ncol = al if al else (None, None, 0)
             print("   t=%6.2fs  x∈[%.3f, %.3f]      %3d 列       %-9s %-9s %d 列   越界 %.2f%%"
                   % (t, x0, x1, over,
